@@ -1,0 +1,127 @@
+---
+title: "In-Class Ex04"
+date: "30 January 2023"
+date-modified: "`r Sys.Date()`"
+format: html
+execute: 
+  echo: true
+  eval: true
+  message: false
+  warning: false
+editor: visual
+---
+
+## Installing and Loading R package
+
+-   spatstat is mainly for spatial point analytics
+
+```{r}
+pacman::p_load(maptools, sf, raster, spatstat, tmap)
+```
+
+### Importing the spatial data
+
+-   data are in meters and are in ***object format***
+-   st_read() extension of r read(), this df will create new columns called "geometry". it stores all the geometry features inside which is a geospatial data.
+-   tidyverse join to sf will retain spatial data.
+
+Childcare is a single file
+
+```{r}
+childcare_sf <- st_read("data/child-care-services-geojson.geojson") %>%
+  st_transform(crs = 3414)
+```
+
+Read in list of data files in the folder
+
+```{r}
+sg_sf <- st_read(dsn = "data", layer="CostalOutline")
+```
+
+```{r}
+mpsz_sf <- st_read(dsn = "data", 
+                layer = "MP14_SUBZONE_WEB_PL")
+```
+
+```{r}
+tmap_mode('view')
+tm_shape(childcare_sf)+
+  tm_dots(alph=0.5,
+          size= 0.01) + 
+  tm_view(set.zoom.limits = c(11,14))
+```
+
+-   tmap_mode('view') will always connect to the server. it is best not to include more than 5.
+
+-   tm_bubbles create proportional symbol maps.
+
+-   tm_view(set.zoom.limits = c(11,14)):
+
+    -   (a,b) a is the zoom out value, b is the zoom in
+
+# 3 steps to take note
+
+1.  The data table is in object format.
+
+```{r}
+childcare <- as_Spatial(childcare_sf)
+mpsz <- as_Spatial(mpsz_sf)
+sg <- as_Spatial(sg_sf)
+```
+
+2.  It drops the object and display it as a polygon format.
+
+```{r}
+childcare_sp <- as(childcare, "SpatialPoints")
+sg_sp <- as(sg, "SpatialPolygons")
+```
+
+3.  this will show a list of the data points.
+
+```{r}
+childcare_ppp <- as(childcare_sp, "ppp")
+childcare_ppp
+```
+
+```{r}
+plot(childcare_ppp)
+```
+
+### Handling Duplicated point events
+
+-   Singapore uses geocoding to retrieve the points
+
+-   uses postal code to plot xy coordinates = duplicates
+
+-   jitter pushes the points slightly to prevent any duplicates.
+
+```{r}
+childcare_ppp_jit <- rjitter(childcare_ppp, 
+                             retry=TRUE, 
+                             nsim=1, 
+                             drop=TRUE)
+```
+
+```{r}
+any(duplicated(childcare_ppp_jit))
+```
+
+### Creating Owin object
+
+-   owin helps to confine within the study layer instead of using the extend the study area.
+
+```{r}
+sg_owin <- as(sg_sp, "owin")
+```
+
+```{r}
+plot(sg_owin)
+```
+
+```{r}
+childcareSG_ppp = childcare_ppp[sg_owin]
+```
+
+```{r}
+plot(childcareSG_ppp)
+```

@@ -1,0 +1,3 @@
+# Welcome to my Geospatial Analytics and Applications journey.
+
+![](img/earth1.gif){fig-align="center"}

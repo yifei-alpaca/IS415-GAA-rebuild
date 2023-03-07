@@ -1,0 +1,108 @@
+---
+title: "In-Class Ex05"
+date: "06 Febuary 2023"
+date-modified: "`r Sys.Date()`"
+format: html
+execute: 
+  echo: true
+  eval: true
+  message: false
+  warning: false
+editor: visual
+---
+
+## Getting started
+
+-   sfdep - working with simple features. point pattern analysis
+
+-   only focus on local clq
+
+```{r}
+pacman::p_load(tidyverse, sf, tmap, sfdep)
+```
+
+### Read in the data
+
+```{r}
+studyArea <- st_read(dsn = "data",
+                     layer = "study_area") %>% 
+  st_transform(crs= 3829)
+```
+
+```{r}
+store <- st_read(dsn = "data",
+                     layer = "stores") %>% 
+  st_transform(crs= 3829)
+```
+
+## Visualizing the sf layer
+
+tm_polygon must be on top followed by the dots
+
+```{r}
+tmap_mode("view") 
+tm_shape(studyArea) + 
+  tm_polygons() +
+tm_shape(store)+ 
+  tm_dots(col = "Name", 
+          size = 0.01,
+          border.col = "black", 
+          border.lwd = 0.5) +
+  tm_view(set.zoom.limits = c(12,16))
+```
+
+## Local Colocation Quotient
+
+number 6 = 6 neighbors (always go for even number)
+
+```{r}
+nb <- include_self(
+  st_knn(st_geometry(store), 6)
+)
+
+```
+
+```{r}
+wt <- st_kernel_weights(nb, 
+                        store, 
+                        "gaussian", 
+                        adaptive = TRUE)
+```
+
+```{r}
+FamilyMart <- store %>% 
+  filter(Name == "Family Mart")
+A <- FamilyMart$Name
+```
+
+```{r}
+SevenEleven <- store %>% 
+  filter(Name == "7-Eleven")
+B <- SevenEleven$Name
+```
+
+```{r}
+LCLQ <-local_colocation(A,B,nb,wt,49)
+```
+
+the code below is to combine both dataframe together. in this case we cannot use relational join because they dont have unique id. LCLQ join to store
+
+```{r}
+LCLQ_stores<-cbind(store, LCLQ)
+```
+
+```{r}
+tmap_mode("view") 
+tm_shape(studyArea) +   
+  tm_polygons() + 
+tm_shape(LCLQ_stores) +   
+  tm_dots(col = "X7.Eleven",           
+          size = 0.1,           
+          border.col = "black",           
+          border.lwd = 0.5) + 
+  tm_dots(col = "X7.Eleven",           
+        size = 0.1,           
+        border.col = "black",           
+        border.lwd = 0.5) +
+tm_view(set.zoom.limits = c(12,16))
+```

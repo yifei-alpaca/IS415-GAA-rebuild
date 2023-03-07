@@ -1,0 +1,194 @@
+---
+title: "Inclass-On Ex07"
+date: "20 Feburary 2023"
+date-modified: "`r Sys.Date()`"
+format: html
+execute: 
+  message: false
+  warning: false
+editor: visual
+---
+
+## Getting Started
+
+```{r}
+pacman::p_load(tidyverse, sf, tmap, spdep, sfdep, plotly)
+```
+
+```{r}
+hunan <- st_read(dsn = "data/geospatial", 
+                 layer = "Hunan")
+```
+
+```{r}
+hunan2012 <- read_csv("data/aspatial/Hunan_2012.csv")
+```
+
+## Relational Join
+
+```{r}
+hunan_GDPPC <- left_join(hunan,hunan2012) %>%
+  select(1:4, 7, 15)
+```
+
+Plot map
+
+```{r}
+
+tm_shape(hunan_GDPPC) +
+  tm_fill("GDPPC",
+          n = 5,
+          style = "quantile") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Equal quantile classification")
+
+
+```
+
+## Deriving contiguity weights Queen's method
+
+```{r}
+wm_q <- hunan_GDPPC %>%
+  mutate(nb= st_contiguity(geometry),
+         wt = st_weights(nb,
+                         style= "W"),
+        .before = 1)
+```
+
+## Computing Global Moran I
+
+```{r}
+moranI <- global_moran(wm_q$GDPPC,
+                       wm_q$nb,
+                       wm_q$wt)
+```
+
+## Performing Global Moran I test
+
+```{r}
+global_moran_test(wm_q$GDPPC,
+                  wm_q$nb,
+                  wm_q$wt
+                  )
+```
+
+## Performing Global Moran I permutation test
+
+```{r}
+set.seed(1234)
+global_moran_perm(wm_q$GDPPC,
+                  wm_q$nb,
+                  wm_q$wt,
+                  nsim =99)
+```
+
+## Computing Local Moran I
+
+unnest() is important
+
+we will use either **mean** or **pysal**
+
+p_ii_sim = after running the simulation test (use after several trial to ensure stability)
+
+```{r}
+lisa <- wm_q %>% 
+  mutate(local_moran= local_moran(
+    GDPPC,nb, wt,nsim = 99),
+          .before = 1) %>% 
+      unnest(local_moran)
+lisa
+```
+
+## Plot mapping
+
+```{r}
+tmap_mode("plot")
+tm_shape(lisa) +
+  tm_fill("ii") +
+  tm_borders(alpha= 0.5) +
+  tm_view(set.zoom.limits = c(6,8))
+```
+
+```{r}
+tmap_mode("plot")
+tm_shape(lisa) +
+  tm_fill("p_ii_sim") +
+  tm_borders(alpha= 0.5)
+```
+
+## Visualising local Moran's I
+
+```{r}
+lisa_sig <- lisa %>% 
+  filter(p_ii <0.05)
+tmap_mode("plot")
+tm_shape(lisa) +
+  tm_polygons() +
+  tm_borders(alpha= 0.5) +
+tm_shape(lisa_sig) +
+  tm_fill("mean") +
+  tm_borders(alpha= 0.4) 
+```
+
+## Hot and Cold spot analysis
+
+```{r}
+HCSA <- wm_q %>% 
+  mutate(local_Gi = local_gstar_perm(
+    GDPPC, nb, wt, nsim= 99),
+      .before =1) %>% 
+  unnest(local_Gi)
+HCSA
+  
+```
+
+Visualising p-value of HCSA
+
+```{r}
+tmap_mode("plot")
+tm_shape(HCSA) +
+  tm_fill("p_sim") +
+  tm_borders(alpha= 0.5) +
+  tm_view(set.zoom.limits = c(6,8))
+```
+
+## Emerging hotspot analysis
+
+can refer to megan's work
+
+can use plotly for interaction map
+
+```{r}
+GDPPC <- read_csv("data/aspatial/Hunan_GDPPC.csv")
+```
+
+this code is to create an spatio-temporal cube
+
+```{r}
+GDPPC_st <- spacetime(GDPPC,hunan, 
+                      .loc_col = "County",
+                      .time_col ="Year")
+```
+
+```{r}
+GDPPC_nb <- GDPPC_st %>% 
+  activate("geometry") %>% 
+  mutate(
+    nb = include_self(st_contiguity(geometry)),
+    wt = st_weights(nb)
+  ) %>% 
+  set_nbs("nb") %>%
+  set_wts("wt")
+```
+
+## Computing Gi
+
+```{r}
+gi_star <- GDPPC_nb %>% 
+  group_by(Year) %>% 
+  mutate(gi_star = local_gstar_perm(
+    GDPPC, nb, wt, nsim= 99)) %>% 
+  tidyr::unnest(gi_star)
+```
+
+if want to categories, we can combine all the value together and use emerging_hotspot_analysis() function.

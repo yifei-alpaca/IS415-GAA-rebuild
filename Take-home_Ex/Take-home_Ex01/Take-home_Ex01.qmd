@@ -1,0 +1,1320 @@
+---
+title: "Take-home_Ex01"
+date: "30 January 2023"
+date-modified: "`r Sys.Date()`"
+format:
+ html:
+  toc: true
+  toc-location: right
+  number-depth: 3
+execute: 
+  message: false
+  warning: false
+editor: visual
+---
+
+# Objective
+
+Geospatial analytics hold tremendous potential to address complex problems facing society. In this study, you are tasked to apply appropriate spatial point patterns analysis methods to discover the geographical distribution of functional and non-function water points and their co-locations if any in Osun State, Nigeria.
+
+# Getting started - Load R packages
+
+```{r}
+pacman::p_load(sf, tidyverse, funModeling, tmap, maptools, raster, spatstat, dplyr,ggplot2, tmap, RColorBrewer, spatialEco)
+```
+
+## Importing GeoSpatial Dataset
+
+```{r}
+NGA <- st_read("data/geospatial/",
+               layer = "nga_admbnda_adm2") %>%
+  st_transform(crs = 26392)
+```
+
+Instead of loading just Osun state, it is good to keep a raw data above in case we need to roll back or for checking purposes. After we look at the data, we can filter for column ADM1_EN and extract out only Osun, Nigeria. Let's run the following chunk of code:
+
+```{r}
+NGA_osun <- st_read("data/geospatial/",
+               layer = "nga_admbnda_adm2") %>%
+  st_transform(crs = 26392) %>% filter(`ADM1_EN` == "Osun")
+```
+
+## Importing Aspatial dataset
+
+### Filter the raw dataset to only in Osun State, Nigeria.
+
+For aspatial data, we can open up csv file to check which are the columns to be filtered. In this case column **#clean_country_name** & **#clean_adm1** will be filtered.
+
+```{r}
+ wp_osun_nga <- read_csv("data/aspatial/WPdx.csv") %>%
+  filter(`#clean_country_name` == "Nigeria" & `#clean_adm1` == "Osun")
+```
+
+Lets do a check on the content of a simple feature data frame.
+
+```{r}
+st_geometry(NGA_osun)
+```
+
+### Converting (aspatial data) into sf point features
+
+We need to convert into sfc field by using **st_as_sfc** data type.
+
+```{r}
+wp_osun_nga$Geometry = st_as_sfc(wp_osun_nga$`New Georeferenced Column`)
+wp_osun_nga
+```
+
+Next, we will convert the dataframe into an sf object by using **st_sf()**. It is important to transform the referencing system of the data into the sf format. Next we have to transform Nigeria projected coordinate system.
+
+```{r}
+wp_sf_osun <- st_sf(wp_osun_nga, crs=4326) %>%
+  st_transform(crs = 26392)
+wp_sf_osun
+```
+
+we can check the transformed projected system.
+
+```{r}
+st_crs(wp_sf_osun)
+```
+
+## Data cleaning
+
+1.  Remove unwanted columns
+    -   As the data set contains many redundant fields, we will be selecting the columns that we want.
+    -   I have included SD_EN for further analysis purposes.
+
+```{r}
+keeps <- c(3:4, 8:9, 15:16)
+NGA_osun = NGA_osun[keeps]
+```
+
+```{r}
+keeps2 <- c(1,2,7:9,11:14,17,21,22,26)
+wp_sf_osun = wp_sf_osun[keeps2]
+```
+
+Check for duplicates for NGA_osun
+
+```{r}
+NGA_osun$ADM2_EN[duplicated(NGA_osun$ADM2_EN)==TRUE]
+```
+
+In this case, there is no duplicate names, we do not need to transform any names. We can move on to the next phase which is the EDA.
+
+# EDA and further cleaning
+
+In our in class exe02, we uses ggplot() of ggplot package to reveal the distribution of water point status visually.
+
+*\*Note: currently my freq() for funModeling package is not working properly, hence, I'm using alternative method to plot the horizontal barchart.*
+
+```{r}
+ggplot(wp_sf_osun) + geom_bar(aes(y = fct_infreq(`#status_clean`), fill=`#status_clean`, stat="identity"))+  theme(legend.position = "right")
+```
+
+As we can see from the image above, there are category which can be group together such as "Abandoned" can combine with "Abandoned/Decommissioned". As we can see that there are quite a number of missing values. Hence, we should rename to "Unknown". The reason for combining:
+
+-   combining rows can increase the overall sample size, which can lead to greater statistical power and more reliable results.
+
+-   it may also improve the quality of the data by identifying and removing errors, outliers, and other anomalies.
+
+```{r}
+wp_sf_osun <- wp_sf_osun %>% 
+  rename(status_clean = '#status_clean') %>%
+  mutate(status_clean = replace_na(
+    status_clean, "Unknown"))
+```
+
+```{r}
+wp_sf_osun$status_clean[wp_sf_osun$status_clean=="Abandoned"]  <- "Abandoned/Decommissioned" 
+```
+
+We can plot the freq distribution diagram again.
+
+```{r}
+#freq(data = wp_sf_osun,
+     #input = 'status_clean')
+
+ggplot(wp_sf_osun) + geom_bar(aes(y = fct_infreq(`status_clean`), fill=`status_clean`, stat="identity"))+  theme(legend.position = "right")
+```
+
+Based on the image above,more than 2000 of the water point are Functional, followed by about 250 needs repair and about 50 are not in use. Whereas for Non-Functional, it is more than 1500 and about 100 are non functional due to the dry season. The unknown status is at about 700 which is quite a large number. If let say, most of the unknown falls under non-functional, we can say that in Osun state close to 50% of the water points are not very clean and further work improvement needs to perform in the future. One of the reason for being "unknown" could be the area have not been accessed yet.
+
+<br>
+
+In order to have a better view, we can plot a chart based on the the (adm2) which is the Secondary Administrative Division.
+
+```{r}
+ggplot(wp_sf_osun, aes(x = `#clean_adm2`, fill = status_clean)) + 
+  geom_bar() + 
+  coord_flip() + 
+  theme_minimal() + 
+  xlab("Secondary Admin Division") + 
+  ylab("Number of status") + 
+  scale_fill_brewer(type = "qual", palette = 3, name = "Status")
+```
+
+As we can see from the image above, Aiyedade has the highest number of status record ( 455 est.) as compared to others. 2nd in line would be Ejigbo (440 est.). The lowest status recorded would be Ife East with a record of 20 est. As for functional water points, Ejigbo seems to have the largest bar as compared to the rest and for non functional water point, ife north seems to have the largest.
+
+<br>
+
+By plotting based on the Secondary Admin Division, it is hard to interpret the area of interest e.g located in the north, south, east or west area. Notice that for **NGA_osun** dataframe, I have included SD_EN which shows the results of East, West and Central. Whereas for **wp_sf_osun**, there is no SD_EN which shows East, West or Central.
+
+<br>
+
+In this section, I would combine both dataset and try to find some useful insights. As mentioned by Prof Kam during in-class 05, we use cbind when the dataset has no unique identifier and it also must have the same number of row. But, in this case, I am able to use relational join even though there is no exact unique identifier but we can join on the Secondary Admin Division as it exists in both data frame. But before joining, we need to make sure that the column name is the same for consistency purposes. We can change it to ADM2_EN for water point.
+
+```{r}
+names(wp_sf_osun)[9] <- "ADM2_EN"
+```
+
+Next, we can proceed to joining the data. But before that, lets deactivate the geometry in this new data frame for the purpose of this EDA analysis. When I first left join, some rows shows NA values, I went to cross check and notice the upper and lower case difference. With that, let's change all names to lower case instead.
+
+```{r}
+wp_sf_osun<- wp_sf_osun %>% 
+ mutate(ADM2_EN = tolower(ADM2_EN)) 
+```
+
+```{r}
+NGA_osun<- NGA_osun %>% 
+ mutate(ADM2_EN = tolower(ADM2_EN)) 
+```
+
+```{r}
+NGA_WP <- left_join(wp_sf_osun %>% as.data.frame(), NGA_osun %>% as.data.frame(), by = "ADM2_EN")
+```
+
+After joining, I still have NA rows. I went to cross check and realized the difference. The spelling and "-".
+
+-   NGA_osun: aiyedire, ola-oluwa
+
+-   wp_sf_osun: ayedire , ola oluwa
+
+In the situation above, I will replace ayedire to aiyedire and ola oluwa to ola-oluwa.
+
+```{r}
+wp_sf_osun$ADM2_EN <- str_replace(wp_sf_osun$ADM2_EN,"ayedire", "aiyedire")
+```
+
+```{r}
+wp_sf_osun$ADM2_EN <- str_replace(wp_sf_osun$ADM2_EN,"ola oluwa", "ola-oluwa")
+```
+
+Next, re join the 2 data frame again.
+
+```{r}
+NGA_WP <- left_join(wp_sf_osun %>% as.data.frame(), NGA_osun %>% as.data.frame(), by = "ADM2_EN")
+```
+
+Lets do a quick check if there is any NA in the column in NGA_WP data frame.
+
+```{r}
+sum(is.na(NGA_WP$SD_EN))
+```
+
+yay! there is no NA values in that column.
+
+Now we can plot a graph based on SD_EN column to have a clearer view of the region.
+
+```{r}
+ggplot(NGA_WP, aes(x = SD_EN, fill = status_clean)) + 
+  geom_bar() + 
+  coord_flip() + 
+  theme_minimal() + 
+  xlab("SD_EN") + 
+  ylab("Number of status") + 
+  scale_fill_brewer(type = "qual", palette = 2, name = "Status")
+```
+
+As we can see from the chart above, Osun west has the most number of status being recorded. It also shows the most functional water point as compared to the other 2 region. As for non functional, Osun East has the most number being recorded.
+
+### Extracting water point data
+
+Functional
+
+```{r}
+wp_functional <- wp_sf_osun %>%
+  filter(status_clean %in%
+           c("Functional",
+             "Functional but not in use",
+             "Functional but needs repair"))
+```
+
+Non Functional
+
+```{r}
+wp_nonfunctional <- wp_sf_osun %>%
+  filter(status_clean %in%
+           c("Abandoned/Decommissioned",
+             "Non-Functional due to dry season",
+             "Non-Functional"))
+```
+
+Unknown
+
+```{r}
+wp_unknown <- wp_sf_osun %>%
+  filter(status_clean == "Unknown")
+```
+
+<br>
+
+### Performing Point in Polygon count
+
+Next, we want to find out the number of total, functional, nonfunctional and unknown water points in each **Secondary Division**.
+
+```{r}
+NGA_wp_SubDiv <- NGA_osun %>% 
+  mutate(`total_wp` = lengths(
+    st_intersects(NGA_osun, wp_sf_osun))) %>%
+  mutate(`wp_functional` = lengths(
+    st_intersects(NGA_osun, wp_functional))) %>%
+  mutate(`wp_nonfunctional` = lengths(
+    st_intersects(NGA_osun, wp_nonfunctional))) %>%
+  mutate(`wp_unknown` = lengths(
+    st_intersects(NGA_osun, wp_unknown)))
+```
+
+## Choropleth Mapping
+
+```{r}
+functional_choroplot <- tm_shape(NGA_wp_SubDiv) +
+  tm_fill("wp_functional",
+          n = 5,
+          style = "equal",
+          palette = "Reds") +
+  tm_borders(lwd = 0.1,
+             alpha = 1) +
+  tm_text("ADM2_EN", size = .7) +
+  tm_layout(main.title = "Distribution of functional water point by Sub Division", 
+            legend.outside = TRUE)
+```
+
+```{r}
+nonfunctional_choroplot <- tm_shape(NGA_wp_SubDiv) +
+  tm_fill("wp_nonfunctional",
+          n = 5,
+          style = "equal",
+          palette = "Reds") +
+  tm_borders(lwd = 0.1,
+             alpha = 1) +
+  tm_text("ADM2_EN", size = .7) +
+  tm_layout(main.title = "Distribution of non-functional water point by Sub Division",
+            legend.outside = TRUE)
+```
+
+```{r}
+functional_choroplot
+```
+
+As shown in the chart above, it has a better view where by ejigbo is more dense than the rest as compared to the bar chart shown above.
+
+```{r}
+nonfunctional_choroplot
+```
+
+Based on images above, we can see that for ejigbo has the highest distribution in functional water point. Whereas for non functional, ejigbo and aiyedade has the highest distribution in non functional water point. This could mean that ejigbo has slightly more functional water point than non functional water point due to its scale.
+
+```{r}
+tmap_mode('plot')
+```
+
+## Choropleth map group by Secondary Division
+
+### Functional
+
+```{r}
+tm_shape(NGA_wp_SubDiv) +
+  tm_fill("wp_functional",
+          style = "equal",
+          palette = "Reds",
+          thres.poly = 0) + 
+   tm_text("ADM2_EN", size = .7) +
+  tm_facets(by="SD_EN", 
+            free.coords=TRUE, 
+            drop.shapes=TRUE) +
+  tm_layout(legend.show = FALSE,
+            title.position = c("center", "center"), 
+            title.size = 20) +
+  tm_borders(alpha = 0.5)
+
+```
+
+### Non-Functional
+
+```{r}
+tm_shape(NGA_wp_SubDiv) +
+  tm_fill("wp_nonfunctional",
+          style = "equal",
+          palette = "Reds",
+          thres.poly = 0) + 
+   tm_text("ADM2_EN", size = .7) +
+  tm_facets(by="SD_EN", 
+            free.coords=TRUE, 
+            drop.shapes=TRUE) +
+  tm_layout(legend.show = FALSE,
+            title.position = c("center", "center"), 
+            title.size = 20) +
+  tm_borders(alpha = 0.5)
+
+```
+
+However, We know that water points are not equally distributed in space. I will tabulate the proportion of functional water points and the proportion of non-functional water points in secondary division.
+
+```{r}
+NGA_wp_SubDiv <- NGA_wp_SubDiv %>%
+  mutate(pct_functional = wp_functional/total_wp) %>%
+  mutate(pct_nonfunctional = wp_nonfunctional/total_wp)
+```
+
+Plotting the map of the rate
+
+```{r}
+functional_choroplot <- tm_shape(NGA_wp_SubDiv) +
+  tm_fill("pct_functional",
+          n = 5,
+          style = "equal",
+          palette = "Purples") +
+  tm_borders(lwd = 0.1,
+             alpha = 1) +
+  tm_layout(main.title = "Rate map of functional water point by Sub Division", 
+            legend.outside = TRUE)
+```
+
+```{r}
+nonfunctional_choroplot <- tm_shape(NGA_wp_SubDiv) +
+  tm_fill("pct_nonfunctional",
+          n = 5,
+          style = "equal",
+          palette = "Purples") +
+  tm_borders(lwd = 0.1,
+             alpha = 1) +
+  tm_layout(main.title = "Rate map of non-functional water point by Sub Division",
+            legend.outside = TRUE)
+```
+
+```{r}
+tmap_arrange(functional_choroplot, nonfunctional_choroplot, nrow = 2)
+```
+
+<br>
+
+# Population Analysis (\*additional findings)
+
+In this section, I have found Nigeria's Subnation population statistic in this website [NGA_Subnation Population](https://data.humdata.org/dataset/cod-ps-nga) statistic. We can download **nga_admpop_adm2_2020.csv.**
+
+In this data set, it is categorized by demographics such as age and sex on a Nigeria administrative level 0-2 . The purpose of this is to help me to identify which area with the most population are affected by water shortages and poor water quality.
+
+### Import aspatial data
+
+```{r}
+nga_osun_pop <- read_csv("data/aspatial/nga_admpop_adm2_2020.csv") %>%
+  filter( `ADM1_NAME` == "OSUN")
+```
+
+After looking at the data, we can keep T_TL as it is refer to the total population. But before that, we can drop unwanted columns to save memory space and clean the data.
+
+```{r}
+keeps_pop <- c(1:9)
+nga_osun_pop = nga_osun_pop[keeps_pop]
+```
+
+```{r}
+nga_osun_pop<- nga_osun_pop %>% 
+ mutate(ADM2_NAME = tolower(ADM2_NAME)) 
+```
+
+### Population Bar chat {#popbar}
+
+Next we can do some basic EDA to understand the data. Because there is some limit in the colors, we have to extend the colors by using **colorRampPalette()** function.
+
+```{r}
+colourCount = length(unique(nga_osun_pop$ADM2_NAME))
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+ggplot(nga_osun_pop, aes(x=ADM2_NAME, y=T_TL, fill=ADM2_NAME )) + 
+  geom_bar(stat = "identity") +
+  coord_flip() + 
+  xlab("ADM2_NAME") + 
+  ylab("Number of population") +
+   geom_text(aes(label=T_TL), color="black", size=2.5)+
+   scale_fill_manual(values = getPalette(colourCount))
+```
+
+As we can see from the chart above ***ife east*** and ***iwo*** has the most population with 312,801 and 302,585 respectively.
+
+Next, we can plot population choropleth mapping, but before that, we should do a join with NGA_wp_SubDiv as we previously joined NGA and wp together to plot choropleth charts. In this case, we have a unique subdivision name ADM2_NAME in nga_osun_pop and can join together with ADM2_EN in NGA_wp_SubDiv.
+
+Change column name:
+
+```{r}
+names(nga_osun_pop)[5] <- "ADM2_EN"
+```
+
+```{r}
+NGA_wp_SubDiv_pop <- left_join(NGA_osun, nga_osun_pop,
+                              by = c("ADM2_EN"))
+```
+
+### Distribution of population by Sub Division {#populationSub}
+
+```{r}
+tmap_mode("plot")
+tm_shape(NGA_wp_SubDiv_pop)+
+  tm_fill("T_TL", 
+          style = "quantile", 
+          palette = "Oranges",
+          legend.show = FALSE,
+         ) +
+  tm_text("ADM2_EN", size = .6) +
+  tm_layout(main.title = "Distribution of Population by Sub Division",
+            main.title.position = "center",
+            main.title.size = 0.8) +tm_borders(alpha = 0.5)
+ 
+```
+
+As we can see from the chart, **ejigbo**, **iwo**, **irewole**, **ife** **central**, **ife** **east** and **oriade** is much more highly distributed as compared to the rest. This shows that the dense area has more population. We will be continue with this data below.
+
+# Exploratory Spatial Data Analysis (ESDA)
+
+Previously, we have converted into SF format which is wp_sf_osun. However, the data frame is for **Aspatial** data. As for **Geospatial** data, we have not yet converting it. We have to convert sf data frames to sp's Spatial class. We will be using NGA_osun.
+
+```{r}
+NGA_osun_s <- as_Spatial(NGA_osun)
+```
+
+Check the description summary of the new sp class data.
+
+```{r}
+NGA_osun_s
+```
+
+```{r}
+NGA_osun_sp <- as(NGA_osun_s, "SpatialPolygons")
+```
+
+```{r}
+NGA_osun_sp
+```
+
+Next, we will be converting water point data frame into ppp format. But first, we have to convert it from sf to sp. Do note that, we have transformed the coordinate system previously hence, we do not need to transform again.
+
+## Functional and Non-Functional
+
+-   any variable with \_f means it is Functional
+
+-   any variable with \_nf means it is Non-Functional
+
+```{r}
+wp_osun_f <- as_Spatial(wp_functional)
+```
+
+```{r}
+wp_osun_nf <- as_Spatial(wp_nonfunctional)
+```
+
+```{r}
+wp_osun_f
+```
+
+```{r}
+wp_osun_nf
+```
+
+Next, convert sf to generic sp format of the water point.
+
+```{r}
+wp_sp_osun_f <- as(wp_osun_f, "SpatialPoints")
+wp_sp_osun_nf <- as(wp_osun_nf, "SpatialPoints")
+```
+
+```{r}
+wp_sp_osun_f
+```
+
+```{r}
+wp_sp_osun_nf
+```
+
+Next, we will use *as.ppp()* function of **spatstat** to convert the spatial data into **spatstat**'s ***ppp*** object format.
+
+```{r}
+wp_ppp_osun_f <- as(wp_sp_osun_f, "ppp")
+wp_ppp_osun_f
+```
+
+```{r}
+wp_ppp_osun_nf <- as(wp_sp_osun_nf, "ppp")
+wp_ppp_osun_nf
+```
+
+```{r}
+summary(wp_ppp_osun_f)
+```
+
+```{r}
+summary(wp_ppp_osun_nf)
+```
+
+Check for duplicates.
+
+```{r}
+any(duplicated(wp_ppp_osun_f))
+```
+
+```{r}
+any(duplicated(wp_ppp_osun_nf))
+```
+
+yay! there is no duplicates.
+
+### Plot water point data by Status {#correlation}
+
+```{r}
+tmap_mode("view")
+tm_shape(wp_osun_f) +
+  tm_dots(alph = 0.7, 
+          size=0.01,
+          palette = "Dark2",
+          col="status_clean") +
+  tm_view(set.zoom.limits = c(8,11))
+```
+
+```{r}
+tmap_mode("view")
+tm_shape(wp_osun_nf) +
+  tm_dots(alph = 0.7, 
+          size=0.01,
+          palette = "Dark2",
+          col="status_clean") +
+  tm_view(set.zoom.limits = c(8,11))
+```
+
+Notice that there are some point that is outside of Osun, Nigeria area. This is because polygon data may contain geometrical inconsistencies such as self-intersections and overlaps. These inconsistencies must be removed to prevent problems in other spatstat functions. By default, polygon data will be repaired automatically using polygon-clipping code. The repair process may change the number of vertices in a polygon and the number of polygon components. With that, we will be using owin object in the next section to help us with that.
+
+```{r}
+tmap_mode('plot')
+```
+
+## Create owin object
+
+***owin*** is specially designed to represent this polygonal region.
+
+```{r}
+NGA_osun_owin <- as(NGA_osun_sp, "owin")
+```
+
+```{r}
+plot(NGA_osun_owin)
+```
+
+### Combining point events object and owin
+
+```{r}
+wpNGA_owin_f = wp_ppp_osun_f[NGA_osun_owin]
+```
+
+```{r}
+wpNGA_owin_nf = wp_ppp_osun_nf[NGA_osun_owin]
+```
+
+```{r}
+plot(wpNGA_owin_f)
+```
+
+```{r}
+plot(wpNGA_owin_nf)
+```
+
+Based on the image above, there is a little cluttered in many different areas. However, it seems that there are more records at the centre & top area of Osun, Nigeria.
+
+# 1st order Spatial Point Pattern Analysis
+
+## **Kernel density estimation (KDE)**
+
+Kernel density estimation maps are considered best for location, size, shape and orientation of the hotspot.
+
+In the hands-on excises, there are a few recommendation in using methods such as, bw.CvL(), bw.scott(), bw.ppl() or bw.diggle(). But before applying the methods, we learnt from our hands-on exe that we should rescale, so as to convert the meters to kilometers.
+
+```{r}
+kde_wpNGA_owin_f_bw.km <- rescale(wpNGA_owin_f, 1000, "km")
+kde_wpNGA_owin_nf_bw.km <- rescale(wpNGA_owin_nf, 1000, "km")
+```
+
+In spatstat, the functions bw.diggle(), bw.ppl(), and bw.scott() can be used to estimate the bandwidth according to difference methods. These functions run algorithms that aim to select an appropriate bandwith.
+
+### Functional
+
+```{r}
+bw.diggle(kde_wpNGA_owin_f_bw.km)
+```
+
+```{r}
+bw.ppl(kde_wpNGA_owin_f_bw.km)
+```
+
+```{r}
+bw.scott(kde_wpNGA_owin_f_bw.km)
+```
+
+### Non-Functional
+
+```{r}
+bw.diggle(kde_wpNGA_owin_nf_bw.km)
+```
+
+```{r}
+bw.ppl(kde_wpNGA_owin_nf_bw.km)
+```
+
+```{r}
+bw.scott(kde_wpNGA_owin_nf_bw.km)
+```
+
+As we can see the Diggle algorithm gives us a narrower bandwidth for both functional and non-functional water point. However, Baddeley et (2016) suggest the use of the bw.ppl() algorithm because in their experience it tends to produce the more appropriate values when the pattern consists predominantly of tight clusters.
+
+Hence, in this take home, I decided to use ppl() for my analysis.
+
+<br>
+
+```{r}
+kde_wpNGA_owin_bw_f <- density(kde_wpNGA_owin_f_bw.km,
+                              sigma=bw.ppl,
+                              edge=TRUE,
+                            kernel="gaussian") 
+```
+
+```{r}
+kde_wpNGA_owin_bw_nf <- density(kde_wpNGA_owin_nf_bw.km,
+                              sigma=bw.ppl,
+                              edge=TRUE,
+                            kernel="gaussian") 
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(kde_wpNGA_owin_bw_f)
+plot(kde_wpNGA_owin_bw_nf)
+```
+
+## Converting KDE output into grid object
+
+Now, we have to convert our KDE outputs into RasterLayer objects. Since we can't do that directly, we'll need to convert them into a SpatialGridDataFrame first, then convert the SpatialGridDataFrame into RasterLayer objects:
+
+```{r}
+gridded_kde_wpNGA_owin_bw_f <- as.SpatialGridDataFrame.im(kde_wpNGA_owin_bw_f)
+spplot(gridded_kde_wpNGA_owin_bw_f)
+```
+
+```{r}
+gridded_kde_wpNGA_owin_bw_nf <- as.SpatialGridDataFrame.im(kde_wpNGA_owin_bw_nf)
+spplot(gridded_kde_wpNGA_owin_bw_nf)
+```
+
+### Converting gridded output into raster
+
+Next, we will convert the gridded kernal density objects into RasterLayer object by using *raster()* of **raster** package.
+
+```{r}
+kde_wpNGA_owin_bw_raster_f <- raster(gridded_kde_wpNGA_owin_bw_f)
+```
+
+```{r}
+kde_wpNGA_owin_bw_raster_nf <- raster(gridded_kde_wpNGA_owin_bw_nf)
+```
+
+```{r}
+kde_wpNGA_owin_bw_raster_f
+```
+
+```{r}
+kde_wpNGA_owin_bw_raster_nf
+```
+
+Notice that the crs property is NA. We have to assign to appropriate projection system with the correct unit of measurement.
+
+```{r}
+projection(kde_wpNGA_owin_bw_raster_f) <- CRS("+init=EPSG:26392 +units=km" )
+kde_wpNGA_owin_bw_raster_f
+```
+
+```{r}
+projection(kde_wpNGA_owin_bw_raster_nf) <- CRS("+init=EPSG:26392 +units=km" )
+kde_wpNGA_owin_bw_raster_nf
+```
+
+Now we can see the crs property completed.
+
+### Visualising the output on OpenStreetMap
+
+```{r}
+density_map <- function(rasterObj, map_title) {
+  tm_basemap("OpenStreetMap") +
+tm_shape(rasterObj) +
+  tm_raster("v", alpha=0.65) + 
+  tm_layout(legend.position = c("right", "bottom"), 
+            legend.height = 0.5, 
+            legend.width = 0.4,
+            main.title = map_title,
+            main.title.position = 'center',
+            main.title.size = 1,
+            frame = FALSE)
+  }
+```
+
+```{r}
+density_map(kde_wpNGA_owin_bw_raster_f, map_title = "Osun Functional Water Point Density Map")
+
+```
+
+```{r}
+density_map(kde_wpNGA_owin_bw_raster_nf, map_title = "Osun Non-Functional Water Point Density Map")
+```
+
+## Comparing Spatial Point Pattern using KDE
+
+Previously, we have included the region in the data set, in this section, we will be comparing KDE water point at Central, East and West region.
+
+### Extract the study area
+
+```{r}
+oe = NGA_osun_s[NGA_osun_s$SD_EN == 'Osun East',]
+ow = NGA_osun_s[NGA_osun_s$SD_EN == 'Osun West',]
+oc = NGA_osun_s[NGA_osun_s$SD_EN == 'Osun Central',]
+```
+
+```{r}
+par(mfrow=c(1,3))
+plot(oc, main="Osun Central")
+plot(oe, main="Osun East")
+plot(ow, main="Osun West")
+
+```
+
+```{r}
+oe_sp = as(oe, "SpatialPolygons")
+ow_sp = as(ow, "SpatialPolygons")
+oc_sp = as(oc, "SpatialPolygons")
+```
+
+```{r}
+oe_owin = as(oe_sp, "owin")
+ow_owin = as(ow_sp, "owin")
+oc_owin = as(oc_sp, "owin")
+```
+
+### Combining Water points and the study area
+
+```{r}
+wp_oe_ppp_f = wp_ppp_osun_f[oe_owin]
+wp_ow_ppp_f = wp_ppp_osun_f[ow_owin]
+wp_oc_ppp_f = wp_ppp_osun_f[oc_owin]
+```
+
+```{r}
+wp_oe_ppp_nf = wp_ppp_osun_nf[oe_owin]
+wp_ow_ppp_nf = wp_ppp_osun_nf[ow_owin]
+wp_oc_ppp_nf = wp_ppp_osun_nf[oc_owin]
+```
+
+Next, rescale() function is used to transform the unit of measurement from m to km
+
+```{r}
+wp_oe_ppp_f.km = rescale(wp_oe_ppp_f, 1000, "km")
+wp_ow_ppp_f.km = rescale(wp_ow_ppp_f, 1000, "km")
+wp_oc_ppp_f.km = rescale(wp_oc_ppp_f, 1000, "km")
+```
+
+```{r}
+wp_oe_ppp_nf.km = rescale(wp_oe_ppp_nf, 1000, "km")
+wp_ow_ppp_nf.km = rescale(wp_ow_ppp_nf, 1000, "km")
+wp_oc_ppp_nf.km = rescale(wp_oc_ppp_nf, 1000, "km")
+```
+
+plot the 3 study area and the location of the water point
+
+```{r}
+par(mfrow=c(1,3))
+plot(wp_oc_ppp_f.km, main="Osun Central Functional")
+plot(wp_oe_ppp_f.km, main="Osun East Functional")
+plot(wp_ow_ppp_f.km, main="Osun West Functional")
+
+```
+
+```{r}
+par(mfrow=c(1,3))
+plot(wp_oc_ppp_nf.km, main="Osun Central Non Functional")
+plot(wp_oe_ppp_nf.km, main="Osun East Non Functional")
+plot(wp_ow_ppp_nf.km, main="Osun West Non Functional")
+
+```
+
+### Computing KDE by Region
+
+Over here, we will continue to use bw.ppl too so as to make a non bias analysis.
+
+```{r}
+par(mfrow=c(1,3))
+plot(density(wp_oc_ppp_f.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian"),
+     main="Osun Central Functional")
+plot(density(wp_oe_ppp_f.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian"),
+     main="Osun East Functional")
+plot(density(wp_ow_ppp_f.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian"),
+     main="Osun West Functional")
+
+```
+
+```{r}
+par(mfrow=c(1,3))
+plot(density(wp_oc_ppp_nf.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian"),
+     main="Osun Central Non Functional")
+plot(density(wp_oe_ppp_nf.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian"),
+     main="Osun East Non Functional")
+plot(density(wp_ow_ppp_nf.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian"),
+     main="Osun West Non Functional")
+
+```
+
+Based on the 3 graph above, we can see that central area seems more concentrated. Although, it is a little hard to narrow down into the division. I will be extracting Osun's population based on region to determine which area we should be analyse on.
+
+```{r}
+tm_shape(NGA_wp_SubDiv_pop) +
+  tm_fill("T_TL",
+          style = "equal",
+          palette = "Oranges",
+          thres.poly = 0) + 
+   tm_text("ADM2_EN", size = .7) +
+  tm_facets(by="SD_EN", 
+            free.coords=TRUE, 
+            drop.shapes=TRUE) +
+  tm_layout(legend.show = FALSE,
+            title.position = c("center", "center"), 
+            title.size = 20) +
+  tm_borders(alpha = 0.5)
+```
+
+As mentioned above [here](#populationSub), **ejigbo, iwon, irewole, oriade, ife central** and **ife east** is most dense and from the bar chart above [here](#popbar) ***ife east*** and ***iwo*** has the most population with 312,801 and 302,585 respectively.
+
+With the findings, I will be narrowing to the 2 most populated division for further analysis:
+
+1.  ife east
+2.  iwo
+
+### Extract the study area for ife east & iwo
+
+```{r}
+ife_east = NGA_osun_s[NGA_osun_s$ADM2_EN == 'ife east',]
+iwo = NGA_osun_s[NGA_osun_s$ADM2_EN == 'iwo',]
+```
+
+```{r}
+ife_east_sp = as(ife_east, "SpatialPolygons")
+iwo_sp = as(iwo, "SpatialPolygons")
+```
+
+```{r}
+ife_east_owin = as(ife_east_sp, "owin")
+iwo_owin = as(iwo_sp, "owin")
+```
+
+```{r}
+wp_ife_east_ppp_f = wp_ppp_osun_f[ife_east_owin]
+wp_iwo_ppp_f = wp_ppp_osun_f[iwo_owin]
+
+wp_ife_east_ppp_nf = wp_ppp_osun_nf[ife_east_owin]
+wp_iwo_ppp_nf = wp_ppp_osun_nf[iwo_owin]
+
+wp_ife_east_ppp_f.km = rescale(wp_ife_east_ppp_f, 1000, "km")
+wp_iwo_ppp_f.km = rescale(wp_iwo_ppp_f, 1000, "km")
+
+wp_ife_east_ppp_nf.km = rescale(wp_ife_east_ppp_nf, 1000, "km")
+wp_iwo_ppp_nf.km = rescale(wp_iwo_ppp_nf, 1000, "km")
+```
+
+```{r}
+
+kde_ife_east_f <- density(wp_ife_east_ppp_f.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian")
+kde_iwo_f <- density(wp_iwo_ppp_f.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian")
+
+    
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot( kde_ife_east_f,
+   main="ife_east Functional")
+plot( kde_iwo_f,
+   main="iwo Functional")
+```
+
+```{r}
+
+kde_ife_east_nf <- density(wp_ife_east_ppp_nf.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian")
+
+kde_iwo_nf <- density(wp_iwo_ppp_nf.km, 
+             sigma=bw.ppl, 
+             edge=TRUE, 
+             kernel="gaussian")
+
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot( kde_ife_east_nf,
+   main="ife_east Non Functional")
+plot( kde_iwo_nf,
+   main="iwo Non Functional")
+```
+
+### Converting KDE output into grid object
+
+```{r}
+gridded_kde_ife_east_f<- as.SpatialGridDataFrame.im(kde_ife_east_f)
+gridded_kde_iwo_f <- as.SpatialGridDataFrame.im(kde_iwo_f)
+
+gridded_kde_ife_east_nf <- as.SpatialGridDataFrame.im(kde_ife_east_nf)
+gridded_kde_iwo_nf <- as.SpatialGridDataFrame.im(kde_iwo_nf)
+
+```
+
+```{r}
+par(mfrow=c(1,2))
+
+spplot(gridded_kde_ife_east_f)
+spplot(gridded_kde_iwo_f)
+```
+
+```{r}
+par(mfrow=c(1,2))
+
+spplot(gridded_kde_ife_east_nf)
+spplot(gridded_kde_iwo_nf)
+```
+
+### Converting gridded output into raster
+
+```{r}
+kde_ife_east_f_raster <- raster(gridded_kde_ife_east_f)
+kde_iwo_f_raster <- raster(gridded_kde_iwo_f)
+kde_ife_east_nf_raster <- raster(gridded_kde_ife_east_nf)
+kde_iwo_nf_raster <- raster(gridded_kde_iwo_nf)
+```
+
+```{r}
+projection(kde_ife_east_f_raster) <- CRS("+init=EPSG:26392 +units=km")
+projection(kde_iwo_f_raster) <- CRS("+init=EPSG:26392 +units=km")
+projection(kde_ife_east_nf_raster) <- CRS("+init=EPSG:26392 +units=km")
+projection(kde_iwo_nf_raster) <- CRS("+init=EPSG:26392 +units=km")
+```
+
+```{r}
+par(mfrow=c(2,4))
+tm_shape(kde_ife_east_f_raster) + 
+  tm_raster("v") +
+  tm_layout(legend.position = c("right", "bottom"), frame = FALSE,
+            main.title = "ife east Funtional",
+            main.title.position = "center",
+            main.title.size = 0.8)
+
+tm_shape(kde_iwo_f_raster) + 
+  tm_raster("v") +
+  tm_layout(legend.position = c("right", "bottom"), frame = FALSE, 
+            main.title = "iwo Functional",
+            main.title.position = "center",
+            main.title.size = 0.8)
+
+
+tm_shape(kde_ife_east_nf_raster) + 
+  tm_raster("v") +
+  tm_layout(legend.position = c("right", "bottom"), frame = FALSE,
+            main.title = "ife east Non Functional",
+            main.title.position = "center",
+            main.title.size = 0.8)
+
+
+tm_shape(kde_iwo_nf_raster) + 
+  tm_raster("v") +
+  tm_layout(legend.position = c("right", "bottom"), frame = FALSE, 
+            main.title = "iwo Non Functional",
+            main.title.position = "center",
+            main.title.size = 0.8)
+
+tmap_mode("plot")
+```
+
+For ife east, there are more non functional than functional water point area as the scale shows are higher range. As for iwo state, functional water point is more than non functional water point. Due to the rural area, improvements of the water points can be challenging as a whole of Osun, Nigeria. Instead, I will be narrowing down to only a state for deeper analysis. The purpose of this analysis could inform policy and decision-making related to water manageand invest in the state, as well as guide efforts to improve the overall water supply system in ife east state because the non functional water point is higher in a highly populated state.
+
+-   Highlight the advantage of kernel density map over point map
+
+    The advantage of kernel density map over point map lies in the ability of the former to provide a smoother representation of the data distribution. Unlike point map which simply plots individual data points, the kernel density map uses a mathematical technique to estimate the underlying probability density function of the data and provides a smooth estimate of the data density over the entire region. This smoothed representation of the data gives a clearer picture of the underlying distribution pattern, making it easier to identify trends and anomalies. Additionally, the use of color gradients in kernel density maps allows for a clearer representation of the distribution range, making it easier to interpret the results.
+
+# 2nd Order Spatial Point Pattern Analysis
+
+Now that we have analysed the spatial point patterns, we have to confirm our observation statistically. I have **narrowed down on my observation to ife east area** which is the **most populated area** and has a higher **non functional water point than iwo**. The nearest-neighbour distance is the measure of distance from each point to its nearest neighbour. G-function measures the distribution of distances from an arbitrary event to its nearest neighbour.
+
+### Ife East Functional - G Function Gest()
+
+-   H0: The distribution of the Functional water points at ife east are randomly distributed
+
+-   H1: The distribution of the Functional water points at ife east are not randomly distributed
+
+-   Confidence level at 95%
+
+-   Significance level: 0.05
+
+-   The null hypothesis will be rejected if p-value is smaller than alpha value of 0.05
+
+```{r}
+G_ife_east_f = Gest(wp_ife_east_ppp_f, correction = "border")
+plot(G_ife_east_f, xlim=c(0,500))
+
+```
+
+```{r}
+G_ife_east_f.csr <- envelope(wp_ife_east_ppp_f, Gest, nsim = 39)
+```
+
+```{r}
+plot(G_ife_east_f.csr)
+```
+
+**Conclusion**: The observed G(r) is above the G(theo) as well as the envelope. This shows that functional water point in ife east are clustered. Hence, we will reject the null hypothesis that the functional water points at ife east are randomly distributed.
+
+### Ife East Non Functional - G Function
+
+-   H0: The distribution of the Non functional water points at ife east are randomly distributed
+
+-   H1: The distribution of the Non Functional water points at ife east are not randomly distributed
+
+-   Confidence level at 95%
+
+-   Significance level: 0.05
+
+-   The null hypothesis will be rejected if p-value is smaller than alpha value of 0.05
+
+```{r}
+G_ife_east_nf = Gest(wp_ife_east_ppp_nf, correction = "border")
+plot(G_ife_east_nf, xlim=c(0,500))
+
+```
+
+```{r}
+G_ife_east_nf.csr <- envelope(wp_ife_east_ppp_nf, Gest, nsim = 39)
+```
+
+```{r}
+plot(G_ife_east_nf.csr)
+```
+
+**Conclusion**: The observed G(r) is above the G(theo) as well as the envelope. This shows that non functional water point in ife east are clustered. Hence, we will reject the null hypothesis that the non functional water points at ife east are randomly distributed.
+
+# Spatial Correlation Analysis
+
+Previously, we have visualize geospatial data on the different status [here](#correlation). Having to further dive in, we can look into the subjective quality in both functional and non functional.
+
+Let's take a look at quality column.
+
+```{r}
+unique(wp_functional$`#subjective_quality`)
+```
+
+```{r}
+unique(wp_nonfunctional$`#subjective_quality`)
+```
+
+Based on the result, both functional and non functional has 4 unique values.
+
+Let's plot them to have a better idea.
+
+```{r}
+tmap_mode("view")
+tm_basemap("OpenStreetMap") +
+tm_shape(wp_functional) +
+  tm_dots(col = '#subjective_quality', size = 0.02, title="Quality Type" ,alpha=0.6,
+          palette = c("#e76f51", "#e9c46a","#2a9d8f"))
+
+```
+
+```{r}
+tm_basemap("OpenStreetMap") +
+tm_shape(wp_nonfunctional) +
+  tm_dots(col = '#subjective_quality', size = 0.02, title="Quality Type" ,alpha=0.6,
+          palette = c("#e76f51", "#e9c46a","#2a9d8f"))
+```
+
+```{r}
+tmap_mode("plot")
+
+```
+
+## **1st order Spatial Point Patterns Analysis**
+
+As we are working with marked data, and we know that the values are categorical (different quality), we need to ensure that the marked field is of factor data type. However, as seen from the output, our subjective_quality field is of chr data type, not factor.
+
+But before that, we need to extract #subjective_quality only in a spatialpoint dataframe format. to do that we can:
+
+```{r}
+#keeps <- c("#subjective_quality")
+#wp_ifeeast = wp_functional[keeps]
+#wp_ifeeast_nf = wp_nonfunctional[keeps]
+wp_ifeeast<-subset(wp_functional, select = c("#subjective_quality"))
+wp_ifeeast_nf<-subset(wp_nonfunctional, select = c("#subjective_quality"))
+```
+
+```{r}
+#wp_ifeeast <- select(wp_functional, )
+#wp_ifeeast_nf <- select(wp_nonfunctional, "#subjective_quality")
+```
+
+```{r}
+wp_ifeeast_f <- as_Spatial(wp_ifeeast)
+wp_ifeeast_nfs <- as_Spatial(wp_ifeeast_nf)
+```
+
+```{r}
+str(wp_ifeeast_f)
+```
+
+```{r}
+wp_ifeeast_f@data$X.subjective_quality <- as.factor(wp_ifeeast_f@data$X.subjective_quality)
+wp_ifeeast_nfs@data$X.subjective_quality <- as.factor(wp_ifeeast_nfs@data$X.subjective_quality)
+```
+
+```{r}
+str(wp_ifeeast_f)
+```
+
+```{r}
+wp_ifeeast_ppp_f <- as.ppp(wp_ifeeast_f)
+wp_ifeeast_ppp_nf <- as.ppp(wp_ifeeast_nfs)
+```
+
+### Plot ppp chart with marked
+
+In this section, I will be using ife east owin object. We will be looking at:
+
+-   ife east quality of water in functional
+
+-   ife east quality of water in non functional
+
+```{r}
+ife_east_marked_ppp <- wp_ifeeast_ppp_f[ife_east_owin]
+ife_east_marked_ppp_nf <- wp_ifeeast_ppp_nf[ife_east_owin]
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(ife_east_marked_ppp, main = "ife east F", which.marks = "X.subjective_quality")
+plot(ife_east_marked_ppp_nf, main = "ife east NF", which.marks = "X.subjective_quality")
+
+```
+
+<br>
+
+```{r}
+plot((density(split(rescale(ife_east_marked_ppp, 1000)))))
+```
+
+```{r}
+plot((density(split(rescale(ife_east_marked_ppp_nf, 1000)))))
+```
+
+Based on the graphs above, acceptable quality and cause of taste seems to have a stronger complementary relationship with each other in ife east area for both functional and non functional area. However, Acceptable quality being the most strong ones due to the scale.
+
+## 2nd order multi type Point pattern Analysis: Cross L-function
+
+In this section, hypothesis testing will be conducted utilising second-order statistics (L function), to assess if the spatial distribution of functional and non-functional water points are independent from each other.
+
+We will be using cross L-function to look into the relationship.
+
+-   H0: The distribution of the acceptable quality and cause of taste in ife east are spatially independent.
+
+-   H1: The distribution of the acceptable quality and cause of taste in ife east are spatially not independent.
+
+-   Confidence level: 95%
+
+-   Significance level: 0.05
+
+In the below section, I will be comparing ife east functional and non functional (Acceptance quality and Cause of taste)
+
+### ife east functional
+
+```{r}
+plot(Lcross(ife_east_marked_ppp, "Acceptable quality", "No because of Taste"))
+```
+
+The plot above reveals that there is a sign that the marked spatial point events are not independent spatially.
+
+We will conduct a randomisation test of the Random Labelling Property.
+
+```{r}
+shuffle<- expression(rlabel(ife_east_marked_ppp))
+montef_Lcross_ifeeast <- envelope(ife_east_marked_ppp, Lcross, nsim=39, simulate=shuffle, i="Acceptable quality", j="No because of Taste", correction="border")
+```
+
+```{r}
+plot(montef_Lcross_ifeeast, xlab="distance(m)")
+```
+
+The plot above reveals that the are signs that the distribution of **functional** water point for acceptable quality and cause of taste are not independent spatially. Unfortunately, we failed to reject the null hypothesis because the L-cross line is within the envelop of the 95% confident interval.
+
+### ife east non functional
+
+```{r}
+plot(Lcross(ife_east_marked_ppp_nf, "Acceptable quality", "No because of Taste"))
+```
+
+```{r}
+shuffle<- expression(rlabel(ife_east_marked_ppp_nf))
+montenf_Lcross_ifeeast <- envelope(ife_east_marked_ppp_nf, Lcross, nsim=39, simulate=shuffle, i="Acceptable quality", j="No because of Taste", correction="border")
+```
+
+```{r}
+plot(montenf_Lcross_ifeeast, xlab="distance(m)")
+```
+
+The plot above reveals that the are signs that the distribution of **non functional** water point for acceptable quality and cause of taste are not independent spatially. Unfortunately, we failed to reject the null hypothesis because the L-cross line is within the envelop of the 95% confident interval.
+
+# Conclusion
+
+In Nigeria, access to safe and reliable water is a challenge, particularly in rural areas. As we can see from the analysis, despite the country's abundant water resources, many communities lack access to clean drinking water due to the poor water facilities, leading to a range of health and economic problems.
+
+Providing safe and reliable access to water is crucial for the health and well-being of communities in Nigeria. A few suggestion for improving water access especially in a more populated state.
+
+1.  Increase access to finance: Many communities lack the resources to develop and maintain water sources. Increasing access to finance can help to overcome this challenge and support water access initiatives.
+
+2.  Collaborate with NGOs and international organizations: Working with NGOs and international organizations can help to leverage resources and expertise to support water access initiatives in ife east.
+
+3.  Promote rainwater harvesting: This can be an effective way of capturing and storing water during the rainy season, which can then be used during the dry season.
+
+<br>
+
+With that, thank you prof Kam for this Take home exe which makes me learn more out of the class! :)

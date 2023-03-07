@@ -1,0 +1,199 @@
+---
+title: "Hands-On Ex02"
+date: "`r Sys.Date()`"
+author: "Sherry Ng"
+format: html
+execute: 
+  message: false
+  warning: false
+editor: visual
+---
+
+## Getting Started
+
+List of packages will be used.
+
+```{r}
+pacman::p_load(sf, tidyverse,readr,readxl,tidyr,dplyr,ggplot2)
+```
+
+<br>
+
+### Importing Geospatial Data
+
+-   [**MP14_SUBZONE_WEB_PL**]{.underline}, a polygon feature layer in ESRI shapefile format
+
+```{r}
+mpsz = st_read(dsn = "data/geospatial", layer = "MP14_SUBZONE_WEB_PL")
+```
+
+-   [**CyclingPath**]{.underline}, a line feature layer in ESRI shapefile format
+
+```{r}
+cyclingpath = st_read(dsn = "data/geospatial", 
+                         layer = "CyclingPathGazette")
+```
+
+-   [**PreSchool**]{.underline}, a point feature layer in kml file format.
+
+```{r}
+preschool = st_read("data/geospatial/pre-schools-location-kml.kml")
+```
+
+<br>
+
+### Plotting the Geospatial Data
+
+```{r}
+plot(mpsz)
+```
+
+Plot only the geometry.
+
+```{r}
+plot(st_geometry(mpsz))
+```
+
+Plot using specific attribute.
+
+```{r}
+plot(mpsz["PLN_AREA_N"])
+```
+
+<br>
+
+### Working with Projection
+
+Change EPSG code from 9001
+
+```{r}
+st_crs(mpsz)
+```
+
+to 3414
+
+```{r}
+mpsz3414 <- st_transform(mpsz, 3414)
+```
+
+```{r}
+st_crs(mpsz3414)
+```
+
+<br>
+
+Transforming the projection of preschool from wgs84 to svy21.
+
+```{r}
+preschool3414 <- st_transform(preschool, 
+                              crs = 3414)
+```
+
+Check:
+
+```{r}
+st_geometry(preschool3414)
+```
+
+<br>
+
+### Importing aspatial data
+
+read in csv file (rmb not to push the csv raw data file to github)
+
+```{r}
+listings <- read.csv("data/aspatial/listings.csv", sep=',')
+```
+
+%\>% is call the "pipe" operator. It is used to perform multiple functions.
+
+```{r}
+listings_sf <- st_as_sf(listings, 
+                       coords = c("longitude", "latitude"),crs=4326) %>%
+  st_transform(crs = 3414)
+```
+
+```{r}
+glimpse(listings_sf)
+```
+
+<br>
+
+### Buffering
+
+[**nQuadSegs**]{.underline} refers to how many segments are generated per quadrant and features. Distance is in meters.
+
+```{r}
+buffer_cycling <- st_buffer(cyclingpath, 
+                               dist=5, nQuadSegs = 30)
+```
+
+calculating the area
+
+```{r}
+buffer_cycling$AREA <- st_area(buffer_cycling)
+```
+
+sum() the total are
+
+```{r}
+sum(buffer_cycling$AREA)
+```
+
+<br>
+
+### Point in polygon count
+
+```{r}
+mpsz3414$`PreSch Count`<- lengths(st_intersects(mpsz3414, preschool3414))
+```
+
+```{r}
+summary(mpsz3414$`PreSch Count`)
+```
+
+\**Note that the count is slightly different from the website. I believed that it is due to the difference in number of rows in the dataset. Currently there is 1925 rows.*
+
+```{r}
+top_n(mpsz3414, 1, `PreSch Count`)
+```
+
+### Density of pre-school by planning subzone
+
+```{r}
+mpsz3414$Area <- mpsz3414 %>%
+  st_area()
+mpsz3414 <- mpsz3414 %>%
+  mutate(`PreSch Density` = `PreSch Count`/Area * 1000000)
+```
+
+```{r}
+plot(mpsz3414['PreSch Density'])
+```
+
+### Exploratory Data Analysis
+
+```{r}
+hist(mpsz3414$`PreSch Density`)
+```
+
+```{r}
+ggplot(data=mpsz3414, 
+       aes(x= as.numeric(`PreSch Density`)))+
+  geom_histogram(bins=20, 
+                 color="black", 
+                 fill="light blue") +
+  labs(title = "Are pre-school even distributed in Singapore?",
+       subtitle= "There are many planning sub-zones with a single pre-school, on the other hand, \nthere are two planning sub-zones with at least 20 pre-schools",
+      x = "Pre-school density (per km sq)",
+      y = "Frequency")
+```
+
+```{r}
+y <- as.numeric(mpsz3414$`PreSch Count`)
+x <- as.numeric(mpsz3414$`PreSch Density`)
+plot(x, y, main = "RS between Pre-school Density and Pre-school Count",
+     xlab = "Pre-school density (per km sq)", ylab = "Pre-school count",
+     pch = 19, frame = FALSE)
+abline(lm(y ~ x, data = mpsz3414), col = "blue")
+```

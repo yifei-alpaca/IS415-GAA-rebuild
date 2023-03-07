@@ -1,0 +1,203 @@
+---
+title: "In-Class Ex02"
+date: "`r Sys.Date()`"
+author: "Sherry Ng"
+format: html
+execute: 
+  message: false
+  warning: false
+editor: visual
+---
+
+## Getting started
+
+Download 3 R packages:
+
+```{r}
+pacman::p_load(sf, tidyverse, funModeling)
+```
+
+<br>
+
+Notes to take note of:
+
+-   st\_ refers to spatial and temporal
+
+-   sf, the table with feature attributes and feature geometries, which contains
+
+-   sfc , the list-column with the geometries for each feature (record), which is composed of
+
+-   sfg, the feature geometry of an individual simple feature.
+
+## Importing Geospatial
+
+### The geoBoundaries dataset
+
+```{r}
+geoNGA <- st_read("data/geospatial/",
+                  layer = "geoBoundaries-NGA-ADM2" ) %>%
+  st_transform(crs=26392)
+```
+
+<br>
+
+### The NGA dataset
+
+```{r}
+NGAadm <- st_read("data/geospatial/",
+                  layer = "nga_admbnda_adm2_osgof_20190417" ) %>%
+  st_transform(crs=26392)
+```
+
+### Importing Aspatial data
+
+```{r}
+wp_nga <- read_csv("data/aspatial/WPdx.csv") %>%
+  filter(`#clean_country_name` == "Nigeria")
+```
+
+### Write the extracted data into rds format
+
+```{r}
+#saveRDS(wp_nga, file = "data/rsd/wp_nga.RDS") 
+```
+
+## Converting Aspatial Data into Geospatial
+
+-   st_as_sfc, convert foreign geomerty object to a sfc object.
+
+-   st_as_sf, convert foreign object to an sf object. if dataset contains a column call "geometry", coords will results in overwriting of this column by sfc geometry list column.
+
+```{r}
+wp_nga$Geometry = st_as_sfc(wp_nga$`New Georeferenced Column`)
+wp_nga
+```
+
+-   st_sf, is to create sf object, which extends df-like objects with a simple feature list column.
+
+```{r}
+wp_sf <- st_sf(wp_nga, crs=4326)
+wp_sf
+```
+
+### Project transformation
+
+check projection
+
+```{r}
+st_crs(wp_sf)
+```
+
+```{r}
+wp_sf <- wp_sf %>%
+  st_transform(crs = 26392)
+```
+
+```{r}
+st_crs(wp_sf)
+```
+
+### Excluded redundant fields
+
+```{r}
+NGA <- NGAadm %>%
+  select(c(3:4, 8:9))
+```
+
+### Check for duplicate names
+
+```{r}
+NGA$ADM2_EN[duplicated(NGA$ADM2_EN)==TRUE]
+```
+
+```{r}
+NGA$ADM2_EN[94] <- "Bassa, Kogi"
+NGA$ADM2_EN[95] <- "Bassa, Plateau"
+NGA$ADM2_EN[304] <- "Ifelodun, Kwara"
+NGA$ADM2_EN[305] <- "Ifelodun, Osun"
+NGA$ADM2_EN[355] <- "Irepodun, Kwara"
+NGA$ADM2_EN[356] <- "Irepodun, Osun"
+NGA$ADM2_EN[519] <- "Nasarawa, Kano"
+NGA$ADM2_EN[520] <- "Nasarawa, Nasarawa"
+NGA$ADM2_EN[546] <- "Obi, Benue"
+NGA$ADM2_EN[547] <- "Obi, Nasarawa"
+NGA$ADM2_EN[693] <- "Surulere, Lagos"
+NGA$ADM2_EN[694] <- "Surulere, Oyo"
+
+```
+
+```{r}
+freq(data=wp_sf,
+     input = "#status_clean")
+```
+
+```{r}
+wp_sf_nga <- wp_sf %>%
+  rename (status_clean = '#status_clean') %>%
+  select (status_clean) %>%
+  mutate(status_clean = replace_na(
+    status_clean, "unknown"))
+```
+
+### Extracting Water Point Data
+
+```{r}
+wp_functional <- wp_sf_nga %>% 
+  filter(status_clean %in%
+    c("Functional",
+    "Functional but not in use",
+    "Functional but needs repair"))
+```
+
+```{r}
+wp_nonfunctional <- wp_sf_nga %>% 
+  filter(status_clean %in%
+    c("Abandoned/Decommissioned",
+      "Abandoned",
+      "Non-Functional due to dry season",
+      "Non-Functional",
+      "Non functional due to dry season"))
+```
+
+extract water point with unknown status.
+
+```{r}
+wp_unknown <- wp_sf_nga %>% 
+  filter(status_clean=="unknown")
+```
+
+```{r}
+NGA_wp <- NGA %>%
+  mutate(`total_wp` = lengths(
+    st_intersects (NGA, wp_sf_nga))) %>%
+  mutate (`wp_functional` = lengths(
+    st_intersects(NGA, wp_functional))) %>%
+  mutate (`wp_nonfunctional` = lengths(
+    st_intersects(NGA, wp_nonfunctional))) %>%
+  mutate(`wp_unknown` = lengths(
+    st_intersects(NGA, wp_unknown)))
+```
+
+### Saving the analytical data in rds format
+
+```{r}
+#saveRDS(NGA_wp,"data/rsd/NGA_wp.rds")
+```
+
+### Visualising attributes by using statistical graphs
+
+```{r}
+ggplot(data = NGA_wp,
+       aes(x = total_wp)) + 
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="light blue") +
+  geom_vline(aes(xintercept=mean(
+    total_wp, na.rm=T)),
+    color="red",
+    linetype="dashed", size=0.8) +
+  ggtitle("Distribution of total water points by LGA") +
+  xlab("No. of water points") + 
+  ylab("No. of\nLGAs") +
+  theme(axis.title.y=element_text(angle = 0))
+```

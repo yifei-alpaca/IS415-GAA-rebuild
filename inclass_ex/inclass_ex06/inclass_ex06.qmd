@@ -1,0 +1,87 @@
+---
+title: "In-Class Ex06"
+date: "13 Febuary 2023"
+date-modified: "`r Sys.Date()`"
+format: html
+execute: 
+  echo: true
+  eval: true
+  message: false
+  warning: false
+editor: visual
+---
+
+## Getting started
+
+```{r}
+pacman::p_load(tidyverse, sf, tmap, spdep, sfdep)
+```
+
+## Import geospatial data
+
+```{r}
+hunan <- st_read(dsn = "data/geospatial", 
+                 layer = "Hunan")
+```
+
+```{r}
+hunan2012 <- read_csv("data/aspatial/Hunan_2012.csv")
+```
+
+## Join data
+
+if want to retain the geometry, no geometry data should be on the left.
+
+```{r}
+hunan_GDPPC <- left_join(hunan,hunan2012)%>%
+  select(1:4, 7, 15)
+```
+
+## Chloropleth Plot
+
+```{r}
+tm_shape(hunan_GDPPC)+
+  tm_fill("GDPPC", 
+          style = "quantile", 
+          palette = "Blues",
+          title = "GDPPC") +
+  tm_layout(main.title = "Distribution of GDP per capital by district",
+            main.title.position = "center",
+            main.title.size = 1.2,
+            legend.height = 0.45, 
+            legend.width = 0.35,
+            frame = TRUE) +
+  tm_borders(alpha = 0.5) +
+  tm_compass(type="8star", size = 2) +
+  tm_scale_bar() +
+  tm_grid(alpha =0.2) 
+
+```
+
+## Computing Contiguity Spatial Weights
+
+knowing the neighbour
+
+```{r}
+cn_queen <- hunan_GDPPC %>%
+  mutate(nb= st_contiguity(geometry),
+        .before = 1)
+```
+
+```{r}
+cn_rook <- hunan_GDPPC %>% 
+    mutate(nb= st_contiguity(geometry),
+           queen = FALSE,
+        .before = 1)
+```
+
+## Contiguity weights: Queen's method
+
+combining the weights together with contiguity in a single code chunk.
+
+```{r}
+cn_queen <- hunan_GDPPC %>%
+  mutate(nb= st_contiguity(geometry),
+         wt = st_weights(nb),
+        .before = 1)
+```
